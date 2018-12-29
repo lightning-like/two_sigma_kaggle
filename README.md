@@ -10,3 +10,9 @@ https://www.kaggle.com/c/two-sigma-financial-news
 
 * submit folder for kernal 
 * command kaggle kernels push  -p submit/
+
+
+
+* view data
+* command kaggle kernels pull -p view_data/
+

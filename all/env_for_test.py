@@ -28,10 +28,12 @@ class Env:
                 data = pd.read_csv(f)
                 self.data.append(data)
 
+
     class IterDays:
         """
         for generate fit->predict data
         """
+        #todo it must be pandas
         class Result:
             """
             To save result per any date
@@ -76,15 +78,20 @@ def make_env():
 
 
 if __name__ == '__main__':
+    with open('all_data.dms','rb') as f:
+        import pickle
+        data = pickle.load(f)
 
-    env = make_env()
-    dates = env.get_prediction_days()
-    print(dates)
-
-    (market_train_df, news_train_df) = env.get_training_data()
-
-    print(market_train_df.head())
-
-    print(market_train_df.tail())
-
-    print(news_train_df.head())
+    print(len(data))
+    #
+    # env = make_env()
+    # dates = env.get_prediction_days()
+    # print(dates)
+    #
+    # (market_train_df, news_train_df) = env.get_training_data()
+    #
+    # print(market_train_df.head())
+    #
+    # print(market_train_df.tail())
+    #
+    # print(news_train_df.head())

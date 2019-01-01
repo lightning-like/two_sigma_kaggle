@@ -3,6 +3,8 @@ env for local test use file from example before pull data
 """
 
 import os
+import pickle
+from typing import Tuple
 
 import pandas as pd
 
@@ -14,57 +16,34 @@ class Env:
     """
 
     module_path = os.path.dirname(__file__)
-    file_list = [
-        module_path + '/marketdata_sample.csv',
-        module_path + '/news_sample.csv'
-        ]
+    input_market_data = module_path + '/input_market_data'
+    input_news_data_1 = module_path + '/input_news_data_1'
+    input_news_data_2 = module_path + '/input_news_data_2'
+    out_data = module_path + '/out_data'
 
     result = []
 
     def __init__(self):
-        self.data = []
-        for file_name in self.file_list:
-            with open(file_name, 'rb') as f:
-                data = pd.read_csv(f)
-                self.data.append(data)
+        with open(self.input_market_data, 'rb') as f:
+            self.market = pickle.load(f)  # type: pd.DataFrame
+
+        with open(self.input_news_data_1, 'rb') as f:
+            f1 = pickle.load(f)  # type: pd.DataFrame
+        with open(self.input_news_data_2, 'rb') as f:
+            f2 = pickle.load(f)  # type: pd.DataFrame
+
+        self.news = pd.concat([f1,f2])
 
 
-    class IterDays:
-        """
-        for generate fit->predict data
-        """
-        #todo it must be pandas
-        class Result:
-            """
-            To save result per any date
-            """
-            def __init__(self, len_):
-                self.confidenceValue = [0 for _ in range(len_)]
-
-            def __len__(self):
-                return len(self.confidenceValue)
-
-        def __init__(self, data):
-            self.limit = 2
-            self.counter = 0
-            self.data = data
-            self.result = self.Result(len(data))
-
-        def __next__(self):
-            if self.counter < self.limit:
-                self.counter += 1
-                return self.data + [self.result]
-            else:
-                raise StopIteration
-
-        def __iter__(self):
-            return self
+        with open(self.out_data, 'rb') as f:
+            self.out = pickle.load(
+                    f)  # type: Tuple[pd.DataFrame, pd.DataFrame , DataFrame ]
 
     def get_prediction_days(self):
-        return self.IterDays(self.data)
+        return self.out
 
     def get_training_data(self):
-        return tuple(self.data)
+        return self.market.copy(), self.news.copy()
 
     def predict(self, predict):
         self.result.append(predict)
@@ -77,21 +56,45 @@ def make_env():
     return Env()
 
 
-if __name__ == '__main__':
-    with open('all_data.dms','rb') as f:
-        import pickle
-        data = pickle.load(f)
+def speed_test():
+    from timeit import default_timer as timer
 
-    print(len(data))
-    #
-    # env = make_env()
-    # dates = env.get_prediction_days()
-    # print(dates)
-    #
-    # (market_train_df, news_train_df) = env.get_training_data()
-    #
-    # print(market_train_df.head())
-    #
-    # print(market_train_df.tail())
-    #
-    # print(news_train_df.head())
+    start = timer()
+
+    with open('news_df.dms', 'rb') as f:
+        news = pd.read_csv(f)
+    print(len(news))
+    download_market = timer()
+    print(download_market - start, ' seconds for market csv')
+    with open('market_df.dms', 'rb') as f:
+        market = pd.read_csv(f)
+    print(len(market))
+    download_cvs = timer()
+    print(download_cvs - start, ' seconds for all csv')
+
+    with open('input_market_data', 'wb') as f:
+        pickle.dump(market, f)
+
+    with open('input_news_data_1', 'wb') as f:
+        pickle.dump(news.loc[:int(len(news) / 2)], f)
+
+    with open('input_news_data_2', 'wb') as f:
+        pickle.dump(news.loc[int(len(news) / 2):], f)
+
+    tmplates = ['market.dms', 'news.dms', 'result.dms']
+
+    predictdate = []
+    for i in range(20):
+        date_ = []
+        for tmp in tmplates:
+            with open(str(i) + tmp, 'rb') as f:
+                date_.append(pd.read_csv(f))
+        predictdate.append(date_)
+
+    with open('out_data', 'wb') as f:
+        pickle.dump(predictdate, f)
+
+
+if __name__ == '__main__':
+
+    speed_test()

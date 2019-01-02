@@ -21,3 +21,9 @@ https://www.kaggle.com/c/two-sigma-financial-news
 https://drive.google.com/open?id=1qCwdAdw4PukkhJVfOgDcaSgfZQGnMGQE
 https://console.cloud.google.com/storage/browser/rl-data-bloomberg-list?project=bloomberg-list
 files with data
+
+
+https://www.kaggle.com/curisca/two-sigma-rocksci?scriptVersionId=9055385 скачайх их пожалуйста из output
+
+https://www.kaggle.com/curisca/two-sigma-rocksci?scriptVersionId=9055570
+https://www.kaggle.com/curisca/two-sigma-rocksci/output?scriptVersionId=9057425

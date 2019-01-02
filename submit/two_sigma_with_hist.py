@@ -22,6 +22,31 @@ class Data:
     save all data and create feature
     """
 
+    news_cols_agg = {
+        'urgency':            ['min', 'count'],
+        'takeSequence':       ['max'],
+        'bodySize':           ['min', 'max', 'mean', 'std'],
+        'wordCount':          ['min', 'max', 'mean', 'std'],
+        'sentenceCount':      ['min', 'max', 'mean', 'std'],
+        'companyCount':       ['min', 'max', 'mean', 'std'],
+        'marketCommentary':   ['min', 'max', 'mean', 'std'],
+        'relevance':          ['min', 'max', 'mean', 'std'],
+        'sentimentNegative':  ['min', 'max', 'mean', 'std'],
+        'sentimentNeutral':   ['min', 'max', 'mean', 'std'],
+        'sentimentPositive':  ['min', 'max', 'mean', 'std'],
+        'sentimentWordCount': ['min', 'max', 'mean', 'std'],
+        'noveltyCount12H':    ['min', 'max', 'mean', 'std'],
+        'noveltyCount24H':    ['min', 'max', 'mean', 'std'],
+        'noveltyCount3D':     ['min', 'max', 'mean', 'std'],
+        'noveltyCount5D':     ['min', 'max', 'mean', 'std'],
+        'noveltyCount7D':     ['min', 'max', 'mean', 'std'],
+        'volumeCounts12H':    ['min', 'max', 'mean', 'std'],
+        'volumeCounts24H':    ['min', 'max', 'mean', 'std'],
+        'volumeCounts3D':     ['min', 'max', 'mean', 'std'],
+        'volumeCounts5D':     ['min', 'max', 'mean', 'std'],
+        'volumeCounts7D':     ['min', 'max', 'mean', 'std']
+        }
+
     # columns
     RETURN_10_NEXT = 'returnsOpenNextMktres10'
     TIME = 'time'
@@ -59,17 +84,28 @@ class Data:
         self._ALLNews = self._ALLNews.append(news, ignore_index=True)
 
     def get_features(self, ticker):
-        market = self._ALLMarket[self._ALLMarket[self.ASSET] == ticker]  # 0.2sec
+        market = self._ALLMarket[
+            self._ALLMarket[self.ASSET] == ticker]  # 0.2sec
+        market.loc[:, self.TIME + 'tmp'] = pd.to_datetime(
+                market[self.TIME]
+                ).dt.strftime("%Y%m%d").astype(int)
+
         news = self._ALLNews[self._ALLNews['assetCodes'].str.contains(
-                "'"+ticker+"'",
+                "'" + ticker + "'",
                 regex=False)]
-        news[self.ASSET] = ticker
+        news.loc[:, self.ASSET] = ticker
+        news.loc[:, self.TIME + 'tmp'] = pd.to_datetime(
+                news[self.TIME]
+                ).dt.strftime("%Y%m%d").astype(int)
+        news = news.groupby(
+                [self.TIME + 'tmp', self.ASSET]
+                ).agg(self.news_cols_agg)
 
-        #todo aggregate look on kernal https://www.kaggle.com/bguberfain/a-simple-model-using-the-market-and-news-data
+        # todo aggregate look on kernal https://www.kaggle.com/bguberfain/a-simple-model-using-the-market-and-news-data
 
-        #todo create feature
+        # todo create features
 
-        return
+        return market.join(news, on=[self.TIME + 'tmp', self.ASSET])
 
 
 if __name__ == '__main__':
@@ -78,8 +114,8 @@ if __name__ == '__main__':
     market_df, news_df = ENV.get_training_data()
     data_obj = Data(market_df, news_df)
 
-
     for ticker in data_obj.univers_ticker[:1]:
+        #todo  join diff tickers
 
         ticker_date = data_obj.get_features(ticker)
         ticker_date.to_csv(ticker + "feature.csv")

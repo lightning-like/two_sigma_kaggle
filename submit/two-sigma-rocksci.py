@@ -139,6 +139,9 @@ def train(data_df):
     svms = {}
     scalers = {}
     for tiker, data_t in list(tickers_df):
+        #todo add columns from other asset
+        #todo add crosvalidation
+        #todo on/off active
         s = SVC(**PARAMS_SVC)
         scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
         x = data_t[TRAIN_COLS]

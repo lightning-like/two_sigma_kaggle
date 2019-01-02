@@ -32,8 +32,7 @@ class Env:
         with open(self.input_news_data_2, 'rb') as f:
             f2 = pickle.load(f)  # type: pd.DataFrame
 
-        self.news = pd.concat([f1,f2])
-
+        self.news = pd.concat([f1, f2])
 
         with open(self.out_data, 'rb') as f:
             self.out = pickle.load(
@@ -56,21 +55,11 @@ def make_env():
     return Env()
 
 
-def speed_test():
-    from timeit import default_timer as timer
-
-    start = timer()
-
+def create_data():
     with open('news_df.dms', 'rb') as f:
         news = pd.read_csv(f)
-    print(len(news))
-    download_market = timer()
-    print(download_market - start, ' seconds for market csv')
     with open('market_df.dms', 'rb') as f:
         market = pd.read_csv(f)
-    print(len(market))
-    download_cvs = timer()
-    print(download_cvs - start, ' seconds for all csv')
 
     with open('input_market_data', 'wb') as f:
         pickle.dump(market, f)
@@ -93,6 +82,41 @@ def speed_test():
 
     with open('out_data', 'wb') as f:
         pickle.dump(predictdate, f)
+
+
+def speed_test():
+    from timeit import default_timer as timer
+
+    start = timer()
+    with open('news_df.dms', 'rb') as f:
+        news = pd.read_csv(f)
+    print(len(news))
+    download_market = timer()
+    print(download_market - start, ' seconds for market csv')
+    with open('market_df.dms', 'rb') as f:
+        market = pd.read_csv(f)
+    print(len(market))
+    download_cvs = timer()
+    print(download_cvs - start, ' seconds for all csv')
+
+    with open('input_market_data', 'rb') as f:
+        market = pickle.load(f)  # type: pd.DataFrame
+    download_pkl_market = timer()
+    print(download_pkl_market - download_cvs, ' seconds for pkl market')
+    with open('input_news_data_1', 'rb') as f:
+        f1 = pickle.load(f)  # type: pd.DataFrame
+    download_pkl_news_1 = timer()
+    print(download_pkl_market - download_pkl_news_1,
+          ' seconds for pkl news 1')
+    with open('input_news_data_2', 'rb') as f:
+        f2 = pickle.load(f)  # type: pd.DataFrame
+    download_pkl_news_2 = timer()
+    print(download_pkl_news_2 - download_pkl_news_1,
+          ' seconds for pkl news 2')
+
+    news = f1.append(f2,ignore_index=True)
+    download_concat = timer()
+    print(download_pkl_news_2 - download_concat, ' seconds for all news')
 
 
 if __name__ == '__main__':

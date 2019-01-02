@@ -19,5 +19,5 @@ https://www.kaggle.com/c/two-sigma-financial-news
 
 * all data from kaggle inpickle
 https://drive.google.com/open?id=1qCwdAdw4PukkhJVfOgDcaSgfZQGnMGQE
-[maket_train, news_train, list[maket_predict] , list[news_predict] , list[result]  ]
-error in pandas
+https://console.cloud.google.com/storage/browser/rl-data-bloomberg-list?project=bloomberg-list
+files with data

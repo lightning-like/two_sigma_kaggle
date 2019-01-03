@@ -54,16 +54,19 @@ class Data():
         market_df['average'] = (market_df['close'] + market_df['open']) / 2
         market_df['pricevolume'] = market_df['volume'] * market_df['close']
 
-        news_df[TIME] =  pd.to_datetime(news_df[TIME]).dt.strftime("%Y%m%d").astype(int)
+        news_df[TIME] =  pd.to_datetime(news_df[TIME]).dt.strftime(
+                "%Y%m%d").astype(int)
         news_df[ASSET] = news_df['assetCodes'].map(lambda x: list(eval(x))[0])
         news_df['position'] = news_df['firstMentionSentence'] / news_df[
             'sentenceCount']
-        news_df['coverage'] = news_df['sentimentWordCount'] / news_df['wordCount']
+        news_df['coverage'] = news_df[
+                                  'sentimentWordCount'] / news_df['wordCount']
 
         # get rid of extra junk from news data
         droplist = ['sourceTimestamp', 'firstCreated', 'sourceId', 'headline',
                     'takeSequence', 'provider', 'firstMentionSentence',
-                    'sentenceCount', 'bodySize', 'headlineTag', 'marketCommentary',
+                    'sentenceCount', 'bodySize', 'headlineTag',
+                    'marketCommentary',
                     'subjects', 'audiences', 'sentimentClass',
                     'assetName', 'assetCodes', 'urgency', 'wordCount',
                     'sentimentWordCount']

@@ -8,6 +8,7 @@ from typing import Tuple
 
 import pandas as pd
 
+FAST = False
 
 # todo try download all data from submit
 class Env:
@@ -20,19 +21,28 @@ class Env:
     input_news_data_1 = module_path + '/input_news_data_1'
     input_news_data_2 = module_path + '/input_news_data_2'
     out_data = module_path + '/out_data'
+    input_market_data_fast = module_path + '/input_market_data_fast'
+    input_news_data_fast = module_path + '/input_news_data_fast'
 
     result = []
 
     def __init__(self):
-        with open(self.input_market_data, 'rb') as f:
-            self.market = pickle.load(f)  # type: pd.DataFrame
+        if not FAST:
+            with open(self.input_market_data, 'rb') as f:
+                self.market = pickle.load(f)  # type: pd.DataFrame
 
-        with open(self.input_news_data_1, 'rb') as f:
-            f1 = pickle.load(f)  # type: pd.DataFrame
-        with open(self.input_news_data_2, 'rb') as f:
-            f2 = pickle.load(f)  # type: pd.DataFrame
+            with open(self.input_news_data_1, 'rb') as f:
+                f1 = pickle.load(f)  # type: pd.DataFrame
+            with open(self.input_news_data_2, 'rb') as f:
+                f2 = pickle.load(f)  # type: pd.DataFrame
+            self.news = pd.concat([f1, f2])
+        else:
+            with open(self.input_market_data_fast, 'rb') as f:
+                self.market = pickle.load(f)  # type: pd.DataFrame
 
-        self.news = pd.concat([f1, f2])
+            with open(self.input_news_data_fast, 'rb') as f:
+                self.news = pickle.load(f)  # type: pd.DataFrame
+
 
         with open(self.out_data, 'rb') as f:
             self.out = pickle.load(
@@ -64,11 +74,18 @@ def create_data():
     with open('input_market_data', 'wb') as f:
         pickle.dump(market, f)
 
+    with open('input_market_data_fast', 'wb') as f:
+        pickle.dump(market.iloc[-10000:], f)
+
+
     with open('input_news_data_1', 'wb') as f:
-        pickle.dump(news.loc[:int(len(news) / 2)], f)
+        pickle.dump(news.iloc[:int(len(news) / 2)], f)
 
     with open('input_news_data_2', 'wb') as f:
-        pickle.dump(news.loc[int(len(news) / 2):], f)
+        pickle.dump(news.iloc[int(len(news) / 2):], f)
+
+    with open('input_news_data_fast', 'wb') as f:
+        pickle.dump(news.iloc[-100000:], f)
 
     tmplates = ['market.dms', 'news.dms', 'result.dms']
 
@@ -121,4 +138,4 @@ def speed_test():
 
 if __name__ == '__main__':
 
-    speed_test()
+    create_data()

@@ -196,6 +196,7 @@ if __name__ == '__main__':
 
     pred_days = ENV.get_prediction_days()
     for market_df, news_df, pred_template_df in pred_days:
+        #todo increse pablic score
         pred_template_df = predict(
                 svms,
                 scalers,

@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 from sklearn.neural_network import MLPClassifier
 
+from all.env_for_test import FAST
+
 try:
     from kaggle.competitions import twosigmanews
 except Exception as error:
@@ -106,7 +108,7 @@ class Data:
             vol = data.iloc[-250:]['close'] * data.iloc[-250:]['volume']
             un = data.iloc[-250:][self.UNIVERSE]
 
-            if un.sum() == 250 and len(data) >= 1568:
+            if FAST or (un.sum() == 250 and len(data) >= 1568):
                 dict_vol[ticker] = (vol.mean())
 
         dict_vol = dict_vol.items()
@@ -128,6 +130,8 @@ class Data:
         self._ALLNews = self._ALLNews.append(news, ignore_index=True)
 
         self._split_data()
+
+
 
     def get_features(self, ticker):
 
@@ -151,34 +155,34 @@ class Data:
         result.loc[:, 'crosSMA50open'] = FSmaCrossing(market['open'], 50)
         result.loc[:, 'gap'] = market['close'].shift(1) / market['open']
         result.loc[:, 'volume'] = FSmaCrossing(market['volume'], 50)
-        result.loc[:, 'urgency min'] = market[('urgency', 'min')].fillna(0)
-        result.loc[:, 'urgency max'] = market[('urgency', 'max')].fillna(0)
-        result.loc[:, 'urgency std'] = market[('urgency', 'std')].fillna(0)
+        result.loc[:, 'urgency min'] = market[('urgency', 'min')]
+        result.loc[:, 'urgency max'] = market[('urgency', 'max')]
+        result.loc[:, 'urgency std'] = market[('urgency', 'std')]
         result.loc[:, 'urgency sma max'] = market[
             ('urgency', 'max')].ffill().rolling(window=20).mean()
         result.loc[:, 'urgency sma min'] = market[
             ('urgency', 'min')].ffill().rolling(window=20).mean()
 
         result.loc[:, 'companyCount'] = market[
-            ('companyCount', 'max')].fillna(0)
+            ('companyCount', 'max')]
 
         result.loc[:, 'sentimentNegative max'] = market[
-            ('sentimentNegative', 'max')].fillna(0)
+            ('sentimentNegative', 'max')]
 
         result.loc[:, 'sentimentNegative min'] = market[
-            ('sentimentNegative', 'min')].fillna(0)
+            ('sentimentNegative', 'min')]
 
         result.loc[:, 'sentimentNegative min'] = market[
-            ('sentimentNegative', 'min')].fillna(0)
+            ('sentimentNegative', 'min')]
 
         result.loc[:, 'sentimentNegative std'] = market[
-            ('sentimentNegative', 'std')].fillna(0)
+            ('sentimentNegative', 'std')]
 
         result.loc[:, 'sentimentNegative std'] = market[
             ('sentimentNegative', 'mean')].ffill().rolling(window=20).mean()
 
         #todo add correlations between stocks
-        result = result.ffill().fillna(0)
+        result = result.fillna(0)
 
 
 
@@ -193,11 +197,11 @@ def get_singl_ans(X: pd.DataFrame, y: list):
         probs = nn.predict_proba(X)
     except Exception as error:
         probs = [None for i in range(len(index_))]
-    result = pd.DataFrame(
+    result = pd.Series(
             [np.random.choice(list(range(len(y))), p=prob)
              for prob in probs],
             index=index_,
-            columns=['ans _col'])
+            name='ans _col')
     return result
 
 
@@ -221,25 +225,36 @@ if __name__ == '__main__':
     from timeit import default_timer as timer
 
     df = []
-    for ticker, tuple_ in data_obj.dict_vol:
+    for ticker, tuple_ in list(data_obj.dict_vol):
         df.append(data_obj.get_features(ticker))
         download_market = timer()
 
-
     df = pd.concat(df, axis=1)
-    for i in range(10):
-        start = timer()
-        ans = [get_singl_ans(df, data_obj.dict_vol) for _ in range(50)]
 
-        #todo calc reword
-        #todo filter best samples
-        for a in ans:
-            download_market = timer()
-            print(download_market - start, ' seconds fit ')
-            nn.partial_fit(df, a,  list(range(len(data_obj.dict_vol))) ) #todo add sell *2 - len()
-        #todo add cross validation
-        download_market = timer()
-        print(download_market - start, ' seconds totala ')
-        # todo in prodaction cacl reword and use propabity as y [-1,1] for small number of stock
-        # todo check posobile of save model between sessions
-        
+    a  = get_singl_ans(df, data_obj.dict_vol)
+
+    ret = []
+    for i in range(len(data_obj.dict_vol)):
+        r = data_obj._ALLMarket_dict[data_obj.dict_vol[i][0]]['returnsOpenNextMktres10']
+        r.index  = a.index[-len(r):]
+        ret.append( r[a == i])
+
+
+    print(pd.concat(ret))
+    # for i in range(1):
+    #     start = timer()
+    #     ans = [get_singl_ans(df, data_obj.dict_vol) for _ in range(50)]
+    #
+    #
+    #
+    #     #todo calc reword
+    #     #todo filter best samples
+    #     for a in ans:
+    #         download_market = timer()
+    #         print(download_market - start, ' seconds fit ')
+    #         nn.partial_fit(df, a,  list(range(len(data_obj.dict_vol))) ) #todo add sell *2 - len()
+    #     #todo add cross validation
+    #     download_market = timer()
+    #     print(download_market - start, ' seconds totala ')
+    #     # todo in prodaction cacl reword and use propabity as y [-1,1] for small number of stock
+    #     # todo check posobile of save model between sessions

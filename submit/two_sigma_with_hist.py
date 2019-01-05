@@ -122,7 +122,7 @@ class Data:
                 dict_vol[ticker] = (vol.mean())
 
         dict_vol = dict_vol.items()
-        self.dict_vol = sorted(dict_vol, key=lambda x: x[1], reverse=True)[:10]
+        self.dict_vol = sorted(dict_vol, key=lambda x: x[1], reverse=True)
 
     def add_data(self,
                  market: pd.DataFrame,
@@ -278,8 +278,12 @@ if __name__ == '__main__':
 
     bl_score_t_top = abs(returns_).groupby('time').sum().values
     bl_score_t_top = bl_score_t_top.mean() / bl_score_t_top.std()
-    y_ = pd.read_csv('best ans.dms')
-    y_ = y_.iloc[-len(returns_):0]
+    r =  returns_['returnsOpenNextMktres10']
+
+    y_ = (returns_['returnsOpenNextMktres10'] > 0).astype(int) * 2 - 1
+    y_[r > r.quantile] = (returns_['returnsOpenNextMktres10'] > 0).astype(int) * 2 - 1
+
+    y_ = y_ * 100
 
 
     nn.partial_fit(df,

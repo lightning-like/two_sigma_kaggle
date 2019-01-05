@@ -1,209 +1,331 @@
-"Baseline"
+"""
+solution of kaggle competion.
+We save all predict data and add it to data
+From all data we create feature for train and predict
+
+model of prediction conteains of pipeline. With tested on cv. for bad cv we just
+off model
+"""
+import warnings
+from timeit import default_timer as timer
+from typing import List
 
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
-from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
 
-#todo prepare data
-#todo make feature
-#todo pipline
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+base = 0.08397673393697565
+
+CAT_ANS = [-100, -75, -50, -25, 0, 25, 50, 75, 100]
 
 try:
     from kaggle.competitions import twosigmanews
+    FAST =False
 except Exception as error:
     print('local test')
+    from all.env_for_test import FAST
     from all import env_for_test as twosigmanews
 
-PARAMS_SVC = {
-    'C':                       1,
-    'decision_function_shape': 'ovr',
-    'kernel':                  'linear'
-    }
 
-RETURN_10_NEXT = 'returnsOpenNextMktres10'
-TIME = 'time'
-ASSET = 'assetCode'
+def FSmaCrossing(close: pd.Series,
+                 window) -> pd.DataFrame:
+    f_sma_1 = close.rolling(window=window, min_periods=window).mean()
+    f_sma_2 = close.rolling(window=2 * window,
+                            min_periods=2 * window).mean()
 
-
-
-class Data():
-
-    ALLMarket = None
-    ALLNews = None
-
-    def prepare_data(self, market_df: pd.DataFrame, news_df: pd.DataFrame):
-        print('preparing data...')
-        # a bit of feature engineering
-        # TODO NEED ADD MA , SHIFTS
-
-        if self.ALLMarket is None:
-            self.ALLMarket = market_df
-        else:
-            self.ALLMarket = pd.concat([self.ALLMarket,market_df])
-
-        if self.ALLNews is None:
-            self.ALLNews = market_df
-        else:
-            self.ALLNews = pd.concat([self.ALLNews, news_df])
+    result = (f_sma_1 - f_sma_2) / f_sma_2
+    return result.to_frame()
 
 
-        market_df[TIME] =pd.to_datetime(market_df[TIME]).dt.strftime("%Y%m%d").astype(int)
-        market_df['bartrend'] = market_df['close'] / market_df['open']
-        market_df['average'] = (market_df['close'] + market_df['open']) / 2
-        market_df['pricevolume'] = market_df['volume'] * market_df['close']
+class Data:
+    """
+    save all data and create feature
+    """
 
-        news_df[TIME] =  pd.to_datetime(news_df[TIME]).dt.strftime(
-                "%Y%m%d").astype(int)
-        news_df[ASSET] = news_df['assetCodes'].map(lambda x: list(eval(x))[0])
-        news_df['position'] = news_df['firstMentionSentence'] / news_df[
-            'sentenceCount']
-        news_df['coverage'] = news_df[
-                                  'sentimentWordCount'] / news_df['wordCount']
+    news_cols_agg = {
+        'urgency':            ['min', 'max', 'std'],
+        'takeSequence':       ['max'],
+        'bodySize':           ['min', 'max', 'mean', 'std'],
+        'wordCount':          ['min', 'max', 'mean', 'std'],
+        'sentenceCount':      ['min', 'max', 'mean', 'std'],
+        'companyCount':       ['min', 'max', 'mean', 'std'],
+        'marketCommentary':   ['min', 'max', 'mean', 'std'],
+        'relevance':          ['min', 'max', 'mean', 'std'],
+        'sentimentNegative':  ['min', 'max', 'mean', 'std'],
+        'sentimentNeutral':   ['min', 'max', 'mean', 'std'],
+        'sentimentPositive':  ['min', 'max', 'mean', 'std'],
+        'sentimentWordCount': ['min', 'max', 'mean', 'std'],
+        'noveltyCount12H':    ['min', 'max', 'mean', 'std'],
+        'noveltyCount24H':    ['min', 'max', 'mean', 'std'],
+        'noveltyCount3D':     ['min', 'max', 'mean', 'std'],
+        'noveltyCount5D':     ['min', 'max', 'mean', 'std'],
+        'noveltyCount7D':     ['min', 'max', 'mean', 'std'],
+        'volumeCounts12H':    ['min', 'max', 'mean', 'std'],
+        'volumeCounts24H':    ['min', 'max', 'mean', 'std'],
+        'volumeCounts3D':     ['min', 'max', 'mean', 'std'],
+        'volumeCounts5D':     ['min', 'max', 'mean', 'std'],
+        'volumeCounts7D':     ['min', 'max', 'mean', 'std']
+        }
 
-        # get rid of extra junk from news data
-        droplist = ['sourceTimestamp', 'firstCreated', 'sourceId', 'headline',
-                    'takeSequence', 'provider', 'firstMentionSentence',
-                    'sentenceCount', 'bodySize', 'headlineTag',
-                    'marketCommentary',
-                    'subjects', 'audiences', 'sentimentClass',
-                    'assetName', 'assetCodes', 'urgency', 'wordCount',
-                    'sentimentWordCount']
-        news_df.drop(droplist, axis=1, inplace=True)
-        market_df.drop(['assetName', 'volume'], axis=1, inplace=True)
+    # columns
+    RETURN_10_NEXT = 'returnsOpenNextMktres10'
+    TIME = 'time'
+    ASSET = 'assetCode'
+    UNIVERSE = 'universe'
+    GROUP_COLS = [TIME, RETURN_10_NEXT, ASSET, UNIVERSE, 'assetName']
 
-        # combine multiple news reports for same assets on same day
-        news_gp = news_df.groupby([TIME, ASSET], sort=False).aggregate(
-                np.mean).reset_index()
+    def TRAIN_COL(self, columns: List):
+        self.TRAIN_COLS = [col for col in columns
+                           if col not in self.GROUP_COLS]
 
-        # join news reports to market data, note many assets will have many
-        # days without news data
-        return pd.merge(market_df, news_gp, how='left', on=[TIME, ASSET],
-                        copy=False).fillna(0)  # , right_on=['time', 'assetCodes'])
+    def __init__(self,
+                 market: pd.DataFrame,
+                 news: pd.DataFrame):
+        """
+        define start data and base columns
+        """
+
+        market.loc[:, self.TIME] = pd.to_datetime(
+                market[self.TIME]
+                ).dt.strftime("%Y%m%d").astype(int)
+
+        self._ALLMarket = market[
+            market[self.TIME] > 20101010]  # type: pd.DataFrame
+
+        news.loc[:, self.TIME] = pd.to_datetime(
+                news[self.TIME]
+                ).dt.strftime("%Y%m%d").astype(int)
+
+        self._ALLNews = news[news[self.TIME] > 20101010]  # type: pd.DataFrame
+
+        self._split_data()
+
+    def _split_data(self):
+        self._ALLMarket_dict = {ticker: df
+                                for ticker, df in self._ALLMarket.groupby(
+                self.ASSET)}
+
+        self._ALLNews_dict = {ticker: df
+                              for tickers, df in self._ALLNews.groupby(
+                'assetCodes') for ticker in eval(tickers)}
+
+        dict_vol = {}
+        for ticker, data in self._ALLMarket_dict.items():
+            vol = data.iloc[-250:]['close'] * data.iloc[-250:]['volume']
+            un = data.iloc[-250:][self.UNIVERSE]
+
+            if FAST or (un.sum() == 250 and len(data) >= 1568):
+                dict_vol[ticker] = (vol.mean())
+
+        dict_vol = dict_vol.items()
+        self.dict_vol = sorted(dict_vol, key=lambda x: x[1], reverse=True)[:10]
+
+    def add_data(self,
+                 market: pd.DataFrame,
+                 news: pd.DataFrame):
+        """
+        save new data in atr. !! there are no check be carefully
+        """
+        market.loc[:, self.TIME] = pd.to_datetime(
+                market[self.TIME]
+                ).dt.strftime("%Y%m%d").astype(int)
+        self._ALLMarket = self._ALLMarket.append(market, ignore_index=True)
+        news.loc[:, self.TIME] = pd.to_datetime(
+                news[self.TIME]
+                ).dt.strftime("%Y%m%d").astype(int)
+        self._ALLNews = self._ALLNews.append(news, ignore_index=True)
+
+        self._split_data()
+
+    def get_features(self, ticker):
+        try:
+            market = self._ALLMarket_dict[ticker]
+            news = self._ALLNews_dict[ticker]
+        except KeyError as error:
+            return pd.DataFrame()
+
+        news = news.groupby(
+                [self.TIME]
+                ).agg(self.news_cols_agg)
+
+        market = market.join(news, on=[self.TIME])
+
+        result = pd.DataFrame()
+        # result.loc[:, 'bartrend'] = market['close'] / market['open']
+        # result.loc[:, 'crosSMA10Close'] = FSmaCrossing(market['close'], 10)
+        # result.loc[:, 'crosSMA50Close'] = FSmaCrossing(market['close'], 50)
+        # result.loc[:, 'crosSMA50open'] = FSmaCrossing(market['open'], 50)
+        # result.loc[:, 'gap'] = market['close'].shift(1) / market['open']
+        # result.loc[:, 'volume'] = FSmaCrossing(market['volume'], 50)
+        # result.loc[:, 'urgency min'] = market[('urgency', 'min')]
+        # result.loc[:, 'urgency max'] = market[('urgency', 'max')]
+        # result.loc[:, 'urgency std'] = market[('urgency', 'std')]
+        # result.loc[:, 'urgency sma max'] = market[
+        #     ('urgency', 'max')].ffill().rolling(window=20).mean()
+        # result.loc[:, 'urgency sma min'] = market[
+        #     ('urgency', 'min')].ffill().rolling(window=20).mean()
+        #
+        # result.loc[:, 'volume p'] = market['volume'] * market['close']
+        #
+        # result.loc[:, 'companyCount'] = market[
+        #     ('companyCount', 'max')]
+        #
+        # result.loc[:, 'sentimentNegative max'] = market[
+        #     ('sentimentNegative', 'max')]
+        #
+        # result.loc[:, 'sentimentNegative min'] = market[
+        #     ('sentimentNegative', 'min')]
+        #
+        # result.loc[:, 'sentimentNegative min'] = market[
+        #     ('sentimentNegative', 'min')]
+        #
+        # result.loc[:, 'sentimentNegative std'] = market[
+        #     ('sentimentNegative', 'std')]
+        #
+        # result.loc[:, 'sentimentNegative std'] = market[
+        #     ('sentimentNegative', 'mean')].ffill().rolling(window=20).mean()
+
+        result.loc[:, 'r'] = market[self.RETURN_10_NEXT]
+        result.loc[:, 'ticker'] = list(self._ALLMarket_dict.keys()).index(
+                ticker)
+        # todo add correlations between stocks
+        result = result.fillna(0)
+        result.index = market[self.TIME]
+
+        return result
 
 
-DATA = Data()
+def get_singl_ans(X: pd.DataFrame, n):
+    index_ = X.index
+    try:
 
-def init_data():
-    ENV = twosigmanews.make_env()
-    market_df, news_df = ENV.get_training_data()
-    data_df = DATA.prepare_data(market_df, news_df)
-    return data_df, ENV
+        probs = nn.predict_proba(X)
 
-
-def get_ans(all_data) -> pd.Series:
-    result = sum(_answer_sma(all_data, window)
-                 for window in range(10, 30 + 1, 1))  # type:  pd.Series
-    result = result.apply(np.sign)
+    except Exception as error:
+        probs = [None for _ in range(len(index_))]
+    func = np.random.choice
+    result = np.vstack(map(lambda x: func(CAT_ANS, n, p=x), probs))
 
     return result
 
 
-def _answer_sma(all_data: pd.DataFrame, window):
-    close = all_data['close']
-    f_sma = close.rolling(window=window, min_periods=window).mean()
-    b_sma = f_sma.shift(-window)
-    b_sma.fillna(close, inplace=True)
-
-    indicator = f_sma - b_sma
-    signal = _get_intersections(indicator, close)
-    return signal
-
-
-def _get_intersections(indicator, time_series):
-    indicator_shift = indicator.shift(1)
-
-    rolling = time_series.rolling(5, center=True)
-    range_ = np.arange(len(time_series) - 4)
-    # find the index number of rolling argmax and argmin
-
-    roll_argmax = rolling.apply(np.argmax)[2:-2].T.astype(int) + range_
-    roll_argmin = rolling.apply(np.argmin)[2:-2].T.astype(int) + range_
-
-    # find the index of buy and sell points (where two sma intersect)
-    # sell_index = result[(indicator >= 0) & (indicator_shift < 0)].index
-    # buy_index = result[(indicator < 0) & (indicator_shift >= 0)].index
-
-    # find local argmax and argmin in the buy and sell points
-    sell_index = roll_argmax[(indicator >= 0) & (indicator_shift < 0)]
-    buy_index = roll_argmin[(indicator < 0) & (indicator_shift >= 0)]
-
-    result = pd.Series(len(time_series) * [0], index=time_series.index)
-    result[result.index[sell_index]] = -1
-    result[result.index[buy_index]] = 1
-
-    return result.astype(int)
-
-
-def train(data_df):
-    d = data_df[data_df['universe'] == 1]
-    tickers_df = d.groupby(ASSET)
-    svms = {}
-    scalers = {}
-    for tiker, data_t in list(tickers_df):
-        #todo add columns from other asset
-        #todo add crosvalidation
-        #todo on/off active
-        s = SVC(**PARAMS_SVC)
-        scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
-        x = data_t[TRAIN_COLS]
-        y = get_ans(data_t)
-        x = scaler.fit_transform(x)
-        try:
-            s.fit(x, y)
-            svms[tiker] = s
-            scalers[tiker] = scaler
-        except ValueError as error:
-            print(error)
-    return svms, scalers
-
-
-def predict(svms, scalers, market_df, news_df, pred_template_df):
-
-    data_df_predict = DATA.prepare_data(market_df, news_df)
-
-    predicts= {}
-    result = []
-    for asset in pred_template_df[ASSET]:
-        data_df_predict_a = data_df_predict[data_df_predict[ASSET] == asset]
-        data_df_predict_a = data_df_predict_a[TRAIN_COLS]
-        try:
-            x = scalers[asset].transform(data_df_predict_a)
-            pred = svms[asset].predict(x)[0]
-            if pred != 0:
-                predicts[asset] = pred
-            else:
-                predicts[asset] = predicts.get(asset,0) * 0.95
-
-            result.append(predicts[asset])
-        except KeyError as error:
-            result.append(0)
-    pred_template_df['confidenceValue'] = result
-    return pred_template_df
-
+nn = MLPClassifier(hidden_layer_sizes=(100, 100),
+                   activation='tanh',
+                   # keep progress between .fit(...) calls
+                   warm_start=True,
+                   # make only 1 iteration on each .fit(...)
+                   max_iter=1)
 
 if __name__ == '__main__':
+    ENV = twosigmanews.make_env()
 
-    data_df, ENV = init_data()
+    market_df, news_df = ENV.get_training_data()
+    data_obj = Data(market_df, news_df)
 
-    GROUP_COLS = [TIME, RETURN_10_NEXT, ASSET, 'universe', 'assetName']
 
-    TRAIN_COLS = [col for col in data_df.columns
-                  if col not in GROUP_COLS]
+    df_cv = []
+    df = []
+    for ticker, tuple_ in data_obj.dict_vol:
+        f = data_obj.get_features(ticker)
+        df.append(f[:-250])
+        df_cv.append(f[-250:])
 
-    svms, scalers = train(data_df)
 
-    pred_days = ENV.get_prediction_days()
-    for market_df, news_df, pred_template_df in pred_days:
-        #todo increse pablic score
-        pred_template_df = predict(
-                svms,
-                scalers,
-                market_df,
-                news_df,
-                pred_template_df)
+    df = pd.concat(df, axis=0, ignore_index=True)
+    df_cv = pd.concat(df_cv, axis=0, ignore_index=True)
 
-        ENV.predict(pred_template_df)
+    scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
 
-    ENV.write_submission_file()
+    df = pd.DataFrame(scaler.fit_transform(df),
+                      columns=df.columns)
+    df_cv = pd.DataFrame(scaler.transform(df_cv),
+                         columns=df_cv.columns)
+
+    ret = []
+    for i in data_obj.dict_vol:
+        r = data_obj._ALLMarket_dict[i[0]][
+                ['returnsOpenNextMktres10',
+                 'time']
+            ].iloc[-250:]
+        ret.append(r)
+
+    returns_c = pd.concat(ret, ignore_index=True)
+    bl_score = returns_c.groupby('time').sum().values
+    bl_score = bl_score.mean() / bl_score.std()
+    top_s = abs(returns_c).groupby('time').sum().values
+    top_s = top_s.mean() / top_s.std()
+
+    ret = []
+
+    for i in data_obj.dict_vol:
+        r = data_obj._ALLMarket_dict[i[0]][
+                ['returnsOpenNextMktres10', 'time']
+            ].iloc[:-250]
+        ret.append(r)
+
+
+    returns_ = pd.concat(ret, ignore_index=True)
+    bl_score_t = returns_.groupby('time').sum().values
+    bl_score_t = bl_score_t.mean() / bl_score_t.std()
+
+    bl_score_t_top = abs(returns_).groupby('time').sum().values
+    bl_score_t_top = bl_score_t_top.mean() / bl_score_t_top.std()
+    #
+    # y_ = (returns_['returnsOpenNextMktres10'] > 0).astype(int) * 2 - 1
+    # y_ = y_ * 100
+    #
+    # nn.partial_fit(df,
+    #                y_,
+    #                CAT_ANS
+    #                )
+
+    ans = []
+    for golbal_loop in range(100):
+        for iteration_ in range(10):
+            start = timer()
+
+            ans += [ a for a in get_singl_ans(df, 30).T]
+            print('time  gen ', start - timer())
+            all_scores = []
+            for a in ans:
+                score_df = returns_
+                score_df['res'] = returns_['returnsOpenNextMktres10'] * a / 100
+                score_df = score_df.groupby('time').sum()['res'].values
+                score = score_df.mean() / score_df.std()
+                all_scores.append(score)
+
+            quant = np.quantile(all_scores, q=0.8)
+            print(quant,
+                  np.quantile(all_scores, q=0.1),
+                  ' vs ',
+                  bl_score_t,
+                  'and',
+                  bl_score_t_top)
+            print('time  score ', start - timer())
+            ans = [a for i, a in enumerate(ans) if all_scores[i] > quant]
+            print('time  filt ', start - timer())
+            x = np.vstack([df.values for _ in range(len(ans))])
+            y = np.hstack(ans)
+            print('time  append ', start - timer())
+            nn.partial_fit(x,
+                           y,
+                           CAT_ANS
+                           )
+            print('time  fit ', start - timer())
+        pred = nn.predict(df_cv)
+        ret = []
+
+        score_df = returns_c
+        score_df['res'] = score_df['returnsOpenNextMktres10'] * pred / 100
+        score_df = score_df.groupby('time').sum()['res'].values
+        score = score_df.mean() / score_df.std()
+        print("_______________CV______________", score, ' VS ', bl_score,
+              ' and ', top_s, ' tree ', base)
+
+        pd.DataFrame(y).to_csv('best ans')
+
+        # todo save prediction
+        # todo check posobile of save model between sessions

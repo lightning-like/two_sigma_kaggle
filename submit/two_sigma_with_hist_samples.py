@@ -6,21 +6,12 @@ From all data we create feature for train and predict
 model of prediction conteains of pipeline. With tested on cv. for bad cv we just
 off model
 """
-import pickle
-import warnings
-from timeit import default_timer as timer
 from typing import List
 
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
 from sklearn.neural_network import MLPClassifier
-
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-base = 0.08397673393697565
-
-CAT_ANS = [-100, -75, -50, -25, 0, 25, 50, 75, 100]
 
 from all.env_for_test import FAST
 
@@ -122,7 +113,7 @@ class Data:
                 dict_vol[ticker] = (vol.mean())
 
         dict_vol = dict_vol.items()
-        self.dict_vol = sorted(dict_vol, key=lambda x: x[1], reverse=True)[:10]
+        self.dict_vol = sorted(dict_vol, key=lambda x: x[1], reverse=True)
 
     def add_data(self,
                  market: pd.DataFrame,
@@ -142,6 +133,7 @@ class Data:
         self._split_data()
 
     def get_features(self, ticker):
+
         try:
             market = self._ALLMarket_dict[ticker]
             news = self._ALLNews_dict[ticker]
@@ -169,8 +161,6 @@ class Data:
         result.loc[:, 'urgency sma min'] = market[
             ('urgency', 'min')].ffill().rolling(window=20).mean()
 
-        result.loc[:, 'volume p'] = market['volume'] * market['close']
-
         result.loc[:, 'companyCount'] = market[
             ('companyCount', 'max')]
 
@@ -189,9 +179,6 @@ class Data:
         result.loc[:, 'sentimentNegative std'] = market[
             ('sentimentNegative', 'mean')].ffill().rolling(window=20).mean()
 
-        # result.loc[:, 'r'] = market[self.RETURN_10_NEXT]
-        result.loc[:, 'ticker'] = list(self._ALLMarket_dict.keys()).index(
-                ticker)
         # todo add correlations between stocks
         result = result.fillna(0)
         result.index = market[self.TIME]
@@ -199,17 +186,17 @@ class Data:
         return result
 
 
-def get_singl_ans(X: pd.DataFrame, n):
+def get_singl_ans(X: pd.DataFrame, y: list):
     index_ = X.index
     try:
-
         probs = nn.predict_proba(X)
-
     except Exception as error:
-        probs = [None for _ in range(len(index_))]
-    func = np.random.choice
-    result = np.vstack(map(lambda x: func(CAT_ANS, n, p=x), probs))
-
+        probs = [None for i in range(len(index_))]
+    result = pd.Series(
+            [np.random.choice(list(range(-len(y), len(y))), p=prob)
+             for prob in probs],
+            index=index_,
+            name='ans _col')
     return result
 
 
@@ -218,118 +205,94 @@ nn = MLPClassifier(hidden_layer_sizes=(100, 100),
                    # keep progress between .fit(...) calls
                    warm_start=True,
                    # make only 1 iteration on each .fit(...)
-                   max_iter=1000)
+                   max_iter=10)
 
 if __name__ == '__main__':
     ENV = twosigmanews.make_env()
 
     market_df, news_df = ENV.get_training_data()
     data_obj = Data(market_df, news_df)
+    market = data_obj._ALLMarket
+    result = []
+    from timeit import default_timer as timer
 
+    ret = []
+    for i in range(len(data_obj.dict_vol)):
+        r = data_obj._ALLMarket_dict[
+                data_obj.dict_vol[i][0]][
+                'returnsOpenNextMktres10'].iloc[-250:]
+        ret.append(r)
+    score_df = pd.concat(ret)
+    bl_score = score_df.mean() / score_df.std()
 
-    df_cv = []
     df = []
-    for ticker, tuple_ in data_obj.dict_vol:
-        f = data_obj.get_features(ticker)
-        df.append(f[:-250])
-        df_cv.append(f[-250:])
+    for ticker, tuple_ in list(data_obj.dict_vol):
+        df.append(data_obj.get_features(ticker))
+        download_market = timer()
 
+    df = pd.concat(df, axis=1)
 
-    df = pd.concat(df, axis=0, ignore_index=True)
-    df_cv = pd.concat(df_cv, axis=0, ignore_index=True)
+    df_cv = df.iloc[-250:]
+    df = df.iloc[:-250]
 
     scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
 
     df = pd.DataFrame(scaler.fit_transform(df),
+                      index=df.index,
                       columns=df.columns)
     df_cv = pd.DataFrame(scaler.transform(df_cv),
+                         index=df_cv.index,
                          columns=df_cv.columns)
 
-    ret = []
-    for i in data_obj.dict_vol:
-        r = data_obj._ALLMarket_dict[i[0]][
-                ['returnsOpenNextMktres10',
-                 'time']
-            ].iloc[-250:]
-        ret.append(r)
-
-    returns_c = pd.concat(ret, ignore_index=True)
-    bl_score = returns_c.groupby('time').sum().values
-    bl_score = bl_score.mean() / bl_score.std()
-    top_s = abs(returns_c).groupby('time').sum().values
-    top_s = top_s.mean() / top_s.std()
-
-    ret = []
-
-    for i in data_obj.dict_vol:
-        r = data_obj._ALLMarket_dict[i[0]][
-                ['returnsOpenNextMktres10', 'time']
-            ].iloc[:-250]
-        ret.append(r)
-
-
-    returns_ = pd.concat(ret, ignore_index=True)
-    with open('p.pkl','wb') as f :
-        pickle.dump(returns_,f)
-
-
-    bl_score_t = returns_.groupby('time').sum().values
-    bl_score_t = bl_score_t.mean() / bl_score_t.std()
-
-    bl_score_t_top = abs(returns_).groupby('time').sum().values
-    bl_score_t_top = bl_score_t_top.mean() / bl_score_t_top.std()
-
-    y_ = (returns_['returnsOpenNextMktres10'] > 0).astype(int) * 2 - 1
-    y_ = y_ * 100
-
-    nn.partial_fit(df,
-                   y_,
-                   CAT_ANS
-                   )
-
-    ans = []
     for golbal_loop in range(100):
         for iteration_ in range(10):
             start = timer()
+            ans = [get_singl_ans(df, data_obj.dict_vol) for _ in range(50)]
 
-            ans += [ a for a in get_singl_ans(df, 30).T]
-            print('time  gen ', start - timer())
+            # todo calc reword
+            # todo filter best samples
             all_scores = []
             for a in ans:
-                score_df = returns_
-                score_df['res'] = returns_['returnsOpenNextMktres10'] * a / 100
-                score_df = score_df.groupby('time').sum()['res'].values
+
+                ret = []
+                for i in range(len(data_obj.dict_vol)):
+                    r = data_obj._ALLMarket_dict[
+                            data_obj.dict_vol[i][0]][
+                            'returnsOpenNextMktres10'].iloc[:-250]
+                    r.index = a.index[-len(r):]
+                    ret.append(r[(a == i)])
+                    ret.append(-r[(a == -i - 1)])
+                score_df = pd.concat(ret)
                 score = score_df.mean() / score_df.std()
                 all_scores.append(score)
 
             quant = np.quantile(all_scores, q=0.8)
-            print(quant,
-                  np.quantile(all_scores, q=0.1),
-                  ' vs ',
-                  bl_score_t,
-                  'and',
-                  bl_score_t_top)
-            print('time  score ', start - timer())
+            print(quant, np.quantile(all_scores, q=0.1))
+
             ans = [a for i, a in enumerate(ans) if all_scores[i] > quant]
-            print('time  filt ', start - timer())
             x = np.vstack([df.values for _ in range(len(ans))])
-            y = np.hstack(ans)
-            print('time  append ', start - timer())
+            y = np.hstack([a.values for a in ans])
             nn.partial_fit(x,
                            y,
-                           CAT_ANS
+                           list(range(-len(data_obj.dict_vol),
+                                      len(data_obj.dict_vol))
+                                )
                            )
-            print('time  fit ', start - timer())
-    pred = nn.predict(df_cv)
-    ret = []
+            download_market = timer()
+            print(download_market - start, ' seconds total ')
 
-    score_df = returns_c
-    score_df['res'] = score_df['returnsOpenNextMktres10'] * pred / 100
-    score_df = score_df.groupby('time').sum()['res'].values
-    score = score_df.mean() / score_df.std()
-    print("_______________CV______________", score, ' VS ', bl_score,
-          ' and ', top_s, ' tree ', base)
+        probs = nn.predict_proba(df_cv)
+        probs = pd.DataFrame(probs)
+        ret = []
+        for i in range(len(data_obj.dict_vol)):
+            r = data_obj._ALLMarket_dict[
+                    data_obj.dict_vol[-i][0]][
+                    'returnsOpenNextMktres10'].iloc[-250:]
+            r.index = probs.index[-len(r):]
+            ret.append(r * (-probs.iloc[:, i] + probs.iloc[:, -i - 1]))
+        score_df = pd.concat(ret)
+        score = score_df.mean() / score_df.std()
+        print("_______________CV______________", score, ' VS ', bl_score)
 
-
-    #     # todo save prediction
-    #     # todo check posobile of save model between sessions
+        # todo save predictionon
+        # todo check posobile of save model between sessions

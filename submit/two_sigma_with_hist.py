@@ -278,9 +278,9 @@ if __name__ == '__main__':
 
     bl_score_t_top = abs(returns_).groupby('time').sum().values
     bl_score_t_top = bl_score_t_top.mean() / bl_score_t_top.std()
+    y_ = pd.read_csv('best ans.dms')
+    y_ = y_.iloc[-len(returns_):0]
 
-    y_ = (returns_['returnsOpenNextMktres10'] > 0).astype(int) * 2 - 1
-    y_ = y_ * 100
 
     nn.partial_fit(df,
                    y_,
@@ -288,38 +288,38 @@ if __name__ == '__main__':
                    )
 
     ans = []
-    for golbal_loop in range(100):
-        for iteration_ in range(10):
-            start = timer()
-
-            ans += [ a for a in get_singl_ans(df, 30).T]
-            print('time  gen ', start - timer())
-            all_scores = []
-            for a in ans:
-                score_df = returns_
-                score_df['res'] = returns_['returnsOpenNextMktres10'] * a / 100
-                score_df = score_df.groupby('time').sum()['res'].values
-                score = score_df.mean() / score_df.std()
-                all_scores.append(score)
-
-            quant = np.quantile(all_scores, q=0.8)
-            print(quant,
-                  np.quantile(all_scores, q=0.1),
-                  ' vs ',
-                  bl_score_t,
-                  'and',
-                  bl_score_t_top)
-            print('time  score ', start - timer())
-            ans = [a for i, a in enumerate(ans) if all_scores[i] > quant]
-            print('time  filt ', start - timer())
-            x = np.vstack([df.values for _ in range(len(ans))])
-            y = np.hstack(ans)
-            print('time  append ', start - timer())
-            nn.partial_fit(x,
-                           y,
-                           CAT_ANS
-                           )
-            print('time  fit ', start - timer())
+    # for golbal_loop in range(100):
+    #     for iteration_ in range(10):
+    #         start = timer()
+    #
+    #         ans += [ a for a in get_singl_ans(df, 30).T]
+    #         print('time  gen ', start - timer())
+    #         all_scores = []
+    #         for a in ans:
+    #             score_df = returns_
+    #             score_df['res'] = returns_['returnsOpenNextMktres10'] * a / 100
+    #             score_df = score_df.groupby('time').sum()['res'].values
+    #             score = score_df.mean() / score_df.std()
+    #             all_scores.append(score)
+    #
+    #         quant = np.quantile(all_scores, q=0.8)
+    #         print(quant,
+    #               np.quantile(all_scores, q=0.1),
+    #               ' vs ',
+    #               bl_score_t,
+    #               'and',
+    #               bl_score_t_top)
+    #         print('time  score ', start - timer())
+    #         ans = [a for i, a in enumerate(ans) if all_scores[i] > quant]
+    #         print('time  filt ', start - timer())
+    #         x = np.vstack([df.values for _ in range(len(ans))])
+    #         y = np.hstack(ans)
+    #         print('time  append ', start - timer())
+    #         nn.partial_fit(x,
+    #                        y,
+    #                        CAT_ANS
+    #                        )
+    #         print('time  fit ', start - timer())
     pred = nn.predict(df_cv)
     ret = []
 

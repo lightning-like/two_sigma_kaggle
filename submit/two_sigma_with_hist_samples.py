@@ -1,19 +1,5 @@
-"""
-solution of kaggle competion.
-We save all predict data and add it to data
-From all data we create feature for train and predict
-
-model of prediction conteains of pipeline. With tested on cv. for bad cv we just
-off model
-"""
-from typing import List
-
 import numpy as np
 import pandas as pd
-from sklearn import preprocessing
-from sklearn.neural_network import MLPClassifier
-
-from all.env_for_test import FAST
 
 try:
     from kaggle.competitions import twosigmanews
@@ -21,278 +7,151 @@ except Exception as error:
     print('local test')
     from all import env_for_test as twosigmanews
 
+env = twosigmanews.make_env()
+(marketdf, newsdf) = env.get_training_data()
 
-def FSmaCrossing(close: pd.Series,
-                 window) -> pd.DataFrame:
-    f_sma_1 = close.rolling(window=window, min_periods=window).mean()
-    f_sma_2 = close.rolling(window=2 * window,
-                            min_periods=2 * window).mean()
-
-    result = (f_sma_1 - f_sma_2) / f_sma_2
-    return result.to_frame()
+print('preparing data...')
 
 
-class Data:
-    """
-    save all data and create feature
-    """
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-    news_cols_agg = {
-        'urgency':            ['min', 'max', 'std'],
-        'takeSequence':       ['max'],
-        'bodySize':           ['min', 'max', 'mean', 'std'],
-        'wordCount':          ['min', 'max', 'mean', 'std'],
-        'sentenceCount':      ['min', 'max', 'mean', 'std'],
-        'companyCount':       ['min', 'max', 'mean', 'std'],
-        'marketCommentary':   ['min', 'max', 'mean', 'std'],
-        'relevance':          ['min', 'max', 'mean', 'std'],
-        'sentimentNegative':  ['min', 'max', 'mean', 'std'],
-        'sentimentNeutral':   ['min', 'max', 'mean', 'std'],
-        'sentimentPositive':  ['min', 'max', 'mean', 'std'],
-        'sentimentWordCount': ['min', 'max', 'mean', 'std'],
-        'noveltyCount12H':    ['min', 'max', 'mean', 'std'],
-        'noveltyCount24H':    ['min', 'max', 'mean', 'std'],
-        'noveltyCount3D':     ['min', 'max', 'mean', 'std'],
-        'noveltyCount5D':     ['min', 'max', 'mean', 'std'],
-        'noveltyCount7D':     ['min', 'max', 'mean', 'std'],
-        'volumeCounts12H':    ['min', 'max', 'mean', 'std'],
-        'volumeCounts24H':    ['min', 'max', 'mean', 'std'],
-        'volumeCounts3D':     ['min', 'max', 'mean', 'std'],
-        'volumeCounts5D':     ['min', 'max', 'mean', 'std'],
-        'volumeCounts7D':     ['min', 'max', 'mean', 'std']
-        }
 
-    # columns
-    RETURN_10_NEXT = 'returnsOpenNextMktres10'
-    TIME = 'time'
-    ASSET = 'assetCode'
-    UNIVERSE = 'universe'
-    GROUP_COLS = [TIME, RETURN_10_NEXT, ASSET, UNIVERSE, 'assetName']
-
-    def TRAIN_COL(self, columns: List):
-        self.TRAIN_COLS = [col for col in columns
-                           if col not in self.GROUP_COLS]
-
-    def __init__(self,
-                 market: pd.DataFrame,
-                 news: pd.DataFrame):
-        """
-        define start data and base columns
-        """
-
-        market.loc[:, self.TIME] = pd.to_datetime(
-                market[self.TIME]
+def prepare_data(marketdf, newsdf):
+    # a bit of feature engineering
+    marketdf['time'] =pd.to_datetime(
+            marketdf['time']
                 ).dt.strftime("%Y%m%d").astype(int)
+    marketdf['bartrend'] = marketdf['close'] / marketdf['open']
+    marketdf['average'] = (marketdf['close'] + marketdf['open']) / 2
+    marketdf['pricevolume'] = marketdf['volume'] * marketdf['close']
 
-        self._ALLMarket = market[
-            market[self.TIME] > 20101010]  # type: pd.DataFrame
-
-        news.loc[:, self.TIME] = pd.to_datetime(
-                news[self.TIME]
+    newsdf['time'] = pd.to_datetime(
+            newsdf['time']
                 ).dt.strftime("%Y%m%d").astype(int)
+    newsdf['assetCode'] = newsdf['assetCodes'].map(lambda x: list(eval(x))[0])
+    newsdf['position'] = newsdf['firstMentionSentence'] / newsdf[
+        'sentenceCount']
+    newsdf['coverage'] = newsdf['sentimentWordCount'] / newsdf['wordCount']
 
-        self._ALLNews = news[news[self.TIME] > 20101010]  # type: pd.DataFrame
+    # filter pre-2012 data, no particular reason
+    marketdf = marketdf.loc[marketdf['time'] > 20120000]
 
-        self._split_data()
+    # get rid of extra junk from news data
+    droplist = ['sourceTimestamp', 'firstCreated', 'sourceId', 'headline',
+                'takeSequence', 'provider', 'firstMentionSentence',
+                'sentenceCount', 'bodySize', 'headlineTag', 'marketCommentary',
+                'subjects', 'audiences', 'sentimentClass',
+                'assetName', 'assetCodes', 'urgency', 'wordCount',
+                'sentimentWordCount']
+    newsdf.drop(droplist, axis=1, inplace=True)
+    marketdf.drop(['assetName', 'volume'], axis=1, inplace=True)
 
-    def _split_data(self):
-        self._ALLMarket_dict = {ticker: df
-                                for ticker, df in self._ALLMarket.groupby(
-                self.ASSET)}
+    # combine multiple news reports for same assets on same day
+    newsgp = newsdf.groupby(['time', 'assetCode'], sort=False).aggregate(
+        np.mean).reset_index()
 
-        self._ALLNews_dict = {ticker: df
-                              for tickers, df in self._ALLNews.groupby(
-                'assetCodes') for ticker in eval(tickers)}
-
-        dict_vol = {}
-        for ticker, data in self._ALLMarket_dict.items():
-            vol = data.iloc[-250:]['close'] * data.iloc[-250:]['volume']
-            un = data.iloc[-250:][self.UNIVERSE]
-
-            if FAST or (un.sum() == 250 and len(data) >= 1568):
-                dict_vol[ticker] = (vol.mean())
-
-        dict_vol = dict_vol.items()
-        self.dict_vol = sorted(dict_vol, key=lambda x: x[1], reverse=True)
-
-    def add_data(self,
-                 market: pd.DataFrame,
-                 news: pd.DataFrame):
-        """
-        save new data in atr. !! there are no check be carefully
-        """
-        market.loc[:, self.TIME] = pd.to_datetime(
-                market[self.TIME]
-                ).dt.strftime("%Y%m%d").astype(int)
-        self._ALLMarket = self._ALLMarket.append(market, ignore_index=True)
-        news.loc[:, self.TIME] = pd.to_datetime(
-                news[self.TIME]
-                ).dt.strftime("%Y%m%d").astype(int)
-        self._ALLNews = self._ALLNews.append(news, ignore_index=True)
-
-        self._split_data()
-
-    def get_features(self, ticker):
-
-        try:
-            market = self._ALLMarket_dict[ticker]
-            news = self._ALLNews_dict[ticker]
-        except KeyError as error:
-            return pd.DataFrame()
-
-        news = news.groupby(
-                [self.TIME]
-                ).agg(self.news_cols_agg)
-
-        market = market.join(news, on=[self.TIME])
-
-        result = pd.DataFrame()
-        result.loc[:, 'bartrend'] = market['close'] / market['open']
-        result.loc[:, 'crosSMA10Close'] = FSmaCrossing(market['close'], 10)
-        result.loc[:, 'crosSMA50Close'] = FSmaCrossing(market['close'], 50)
-        result.loc[:, 'crosSMA50open'] = FSmaCrossing(market['open'], 50)
-        result.loc[:, 'gap'] = market['close'].shift(1) / market['open']
-        result.loc[:, 'volume'] = FSmaCrossing(market['volume'], 50)
-        result.loc[:, 'urgency min'] = market[('urgency', 'min')]
-        result.loc[:, 'urgency max'] = market[('urgency', 'max')]
-        result.loc[:, 'urgency std'] = market[('urgency', 'std')]
-        result.loc[:, 'urgency sma max'] = market[
-            ('urgency', 'max')].ffill().rolling(window=20).mean()
-        result.loc[:, 'urgency sma min'] = market[
-            ('urgency', 'min')].ffill().rolling(window=20).mean()
-
-        result.loc[:, 'companyCount'] = market[
-            ('companyCount', 'max')]
-
-        result.loc[:, 'sentimentNegative max'] = market[
-            ('sentimentNegative', 'max')]
-
-        result.loc[:, 'sentimentNegative min'] = market[
-            ('sentimentNegative', 'min')]
-
-        result.loc[:, 'sentimentNegative min'] = market[
-            ('sentimentNegative', 'min')]
-
-        result.loc[:, 'sentimentNegative std'] = market[
-            ('sentimentNegative', 'std')]
-
-        result.loc[:, 'sentimentNegative std'] = market[
-            ('sentimentNegative', 'mean')].ffill().rolling(window=20).mean()
-
-        # todo add correlations between stocks
-        result = result.fillna(0)
-        result.index = market[self.TIME]
-
-        return result
+    # join news reports to market data, note many assets will have many days without news data
+    return pd.merge(marketdf, newsgp, how='left', on=['time', 'assetCode'],
+                    copy=False)  # , right_on=['time', 'assetCodes'])
 
 
-def get_singl_ans(X: pd.DataFrame, y: list):
-    index_ = X.index
-    try:
-        probs = nn.predict_proba(X)
-    except Exception as error:
-        probs = [None for i in range(len(index_))]
-    result = pd.Series(
-            [np.random.choice(list(range(-len(y), len(y))), p=prob)
-             for prob in probs],
-            index=index_,
-            name='ans _col')
-    return result
+cdf = prepare_data(marketdf, newsdf)
+del marketdf, newsdf  # save the precious memory
+
+#################################################################################
+print('building training set...')
+targetcols = ['returnsOpenNextMktres10']
+traincols = [col for col in cdf.columns if
+             col not in ['time', 'assetCode', 'universe'] + targetcols]
+
+dates = cdf['time'].unique()
+train = range(len(dates))[:int(0.85 * len(dates))-250]
+val = range(len(dates))[int(0.85 * len(dates))-250:-250]
+
+test = range(len(dates))[-250:]
+
+# we be classifyin
+cdf['tst'] = cdf[targetcols[0]]
+cdf[targetcols[0]] = (cdf[targetcols[0]] > 0).astype(int) *2 -1
 
 
-nn = MLPClassifier(hidden_layer_sizes=(100, 100),
-                   activation='tanh',
-                   # keep progress between .fit(...) calls
-                   warm_start=True,
-                   # make only 1 iteration on each .fit(...)
-                   max_iter=10)
+r = abs(cdf['tst'])
+cdf[targetcols[0]][r > r.quantile()] /= 2
+r[r > r.quantile()] /= 2
+cdf[targetcols[0]][r > r.quantile()] /= 2
+# train data
+Xt = cdf[traincols].fillna(0).loc[cdf['time'].isin(dates[train])].values
+Yt = cdf[targetcols].fillna(0).loc[cdf['time'].isin(dates[train])].values
 
-if __name__ == '__main__':
-    ENV = twosigmanews.make_env()
+# validation data
+Xv = cdf[traincols].fillna(0).loc[cdf['time'].isin(dates[val])].values
+Yv = cdf[targetcols].fillna(0).loc[cdf['time'].isin(dates[val])].values
 
-    market_df, news_df = ENV.get_training_data()
-    data_obj = Data(market_df, news_df)
-    market = data_obj._ALLMarket
-    result = []
-    from timeit import default_timer as timer
+# validation data
+Xtest = cdf[traincols].fillna(0).loc[cdf['time'].isin(dates[test])].values
+Ytest = cdf[['tst','time']].loc[cdf['time'].isin(dates[test])]
 
-    ret = []
-    for i in range(len(data_obj.dict_vol)):
-        r = data_obj._ALLMarket_dict[
-                data_obj.dict_vol[i][0]][
-                'returnsOpenNextMktres10'].iloc[-250:]
-        ret.append(r)
-    score_df = pd.concat(ret)
-    bl_score = score_df.mean() / score_df.std()
 
-    df = []
-    for ticker, tuple_ in list(data_obj.dict_vol):
-        df.append(data_obj.get_features(ticker))
-        download_market = timer()
+print(Xt.shape, Xv.shape)
 
-    df = pd.concat(df, axis=1)
+#######################################################
+##
+## LightGBM
+##
+#######################################################
+import lightgbm as lgb
 
-    df_cv = df.iloc[-250:]
-    df = df.iloc[:-250]
+print('Training lightgbm')
 
-    scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
+# money
+params = {"objective":        "binary",
+          "metric":           "binary_logloss",
+          "num_leaves":       60,
+          "max_depth":        -1,
+          "learning_rate":    0.01,
+          "bagging_fraction": 0.9,  # subsample
+          "feature_fraction": 0.9,  # colsample_bytree
+          "bagging_freq":     5,  # subsample_freq
+          "bagging_seed":     2018,
+          "verbosity":        -1
+          }
 
-    df = pd.DataFrame(scaler.fit_transform(df),
-                      index=df.index,
-                      columns=df.columns)
-    df_cv = pd.DataFrame(scaler.transform(df_cv),
-                         index=df_cv.index,
-                         columns=df_cv.columns)
+lgtrain, lgval = lgb.Dataset(Xt, Yt[:, 0]), lgb.Dataset(Xv, Yv[:, 0])
+lgbmodel = lgb.train(params, lgtrain, 2000, valid_sets=[lgtrain, lgval],
+                     early_stopping_rounds=100, verbose_eval=200)
 
-    for golbal_loop in range(100):
-        for iteration_ in range(10):
-            start = timer()
-            ans = [get_singl_ans(df, data_obj.dict_vol) for _ in range(50)]
+preds = lgbmodel.predict(Xtest, num_iteration=lgbmodel.best_iteration)
 
-            # todo calc reword
-            # todo filter best samples
-            all_scores = []
-            for a in ans:
+Ytest['res'] = Ytest['tst']* preds
+res = Ytest.groupby('time').sum()['res'].values
+print(res.mean()/res.std()) #0.14923083887714048
+# ############################################################
+# print("generating predictions...")
+# preddays = env.get_prediction_days()
+# for marketdf, newsdf, predtemplatedf in preddays:
+#     cdf = prepare_data(marketdf, newsdf)
+#     Xp = cdf[traincols].fillna(0).values
+#     preds = lgbmodel.predict(Xp, num_iteration=lgbmodel.best_iteration) * 2 - 1
+#     predsdf = pd.DataFrame({'ast': cdf['assetCode'], 'conf': preds})
+#     predtemplatedf['confidenceValue'][
+#         predtemplatedf['assetCode'].isin(predsdf.ast)] = predsdf['conf'].values
+#     env.predict(predtemplatedf)
+#
+# env.write_submission_file()
 
-                ret = []
-                for i in range(len(data_obj.dict_vol)):
-                    r = data_obj._ALLMarket_dict[
-                            data_obj.dict_vol[i][0]][
-                            'returnsOpenNextMktres10'].iloc[:-250]
-                    r.index = a.index[-len(r):]
-                    ret.append(r[(a == i)])
-                    ret.append(-r[(a == -i - 1)])
-                score_df = pd.concat(ret)
-                score = score_df.mean() / score_df.std()
-                all_scores.append(score)
 
-            quant = np.quantile(all_scores, q=0.8)
-            print(quant, np.quantile(all_scores, q=0.1))
 
-            ans = [a for i, a in enumerate(ans) if all_scores[i] > quant]
-            x = np.vstack([df.values for _ in range(len(ans))])
-            y = np.hstack([a.values for a in ans])
-            nn.partial_fit(x,
-                           y,
-                           list(range(-len(data_obj.dict_vol),
-                                      len(data_obj.dict_vol))
-                                )
-                           )
-            download_market = timer()
-            print(download_market - start, ' seconds total ')
 
-        probs = nn.predict_proba(df_cv)
-        probs = pd.DataFrame(probs)
-        ret = []
-        for i in range(len(data_obj.dict_vol)):
-            r = data_obj._ALLMarket_dict[
-                    data_obj.dict_vol[-i][0]][
-                    'returnsOpenNextMktres10'].iloc[-250:]
-            r.index = probs.index[-len(r):]
-            ret.append(r * (-probs.iloc[:, i] + probs.iloc[:, -i - 1]))
-        score_df = pd.concat(ret)
-        score = score_df.mean() / score_df.std()
-        print("_______________CV______________", score, ' VS ', bl_score)
 
-        # todo save predictionon
-        # todo check posobile of save model between sessions
+
+
+
+
+
+
+
+
+
+
+

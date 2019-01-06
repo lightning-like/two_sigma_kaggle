@@ -10,11 +10,24 @@ import pickle
 import warnings
 from timeit import default_timer as timer
 from typing import List
-
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
 from sklearn.neural_network import MLPClassifier
+
+
+params = {"objective":        "binary",
+          "metric":           "binary_logloss",
+          "num_leaves":       60,
+          "max_depth":        -1,
+          "learning_rate":    0.01,
+          "bagging_fraction": 0.9,  # subsample
+          "feature_fraction": 0.9,  # colsample_bytree
+          "bagging_freq":     5,  # subsample_freq
+          "bagging_seed":     2018,
+          "verbosity":        -1
+          }
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -155,6 +168,8 @@ class Data:
         market = market.join(news, on=[self.TIME])
 
         result = pd.DataFrame()
+
+        result.loc[:, 'opent std'] = market['open'].rolling(window=20).std()
         result.loc[:, 'bartrend'] = market['close'] / market['open']
         result.loc[:, 'crosSMA10Close'] = FSmaCrossing(market['close'], 10)
         result.loc[:, 'crosSMA50Close'] = FSmaCrossing(market['close'], 50)
@@ -229,14 +244,17 @@ if __name__ == '__main__':
 
     df_cv = []
     df = []
+    cv_  = []
     for ticker, tuple_ in data_obj.dict_vol:
         f = data_obj.get_features(ticker)
-        df.append(f[:-250])
-        df_cv.append(f[-250:])
+        df.append(f.iloc[:-500])
+        cv_.append(f.iloc[-500:-250])
+        df_cv.append(f.iloc[-250:])
 
 
     df = pd.concat(df, axis=0, ignore_index=True)
     df_cv = pd.concat(df_cv, axis=0, ignore_index=True)
+    cv_ = pd.concat(cv_, axis=0, ignore_index=True)
 
     scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
 
@@ -259,38 +277,55 @@ if __name__ == '__main__':
     top_s = abs(returns_c).groupby('time').sum().values
     top_s = top_s.mean() / top_s.std()
 
-    ret = []
+    r10t  = []
+    r10cv  = []
+    r10test  = []
 
     for i in data_obj.dict_vol:
         r = data_obj._ALLMarket_dict[i[0]][
                 ['returnsOpenNextMktres10', 'time']
-            ].iloc[:-250]
-        ret.append(r)
+            ]
+        r10t.append(r.iloc[:-500])
+        r10cv.append(r.iloc[-500:-250])
+        r10test.append(r.iloc[:-250])
 
+    r10t = pd.concat(r10t, ignore_index=True)
+    r10cv = pd.concat(r10cv, ignore_index=True)
+    r10test = pd.concat(r10test, ignore_index=True)
 
-    returns_ = pd.concat(ret, ignore_index=True)
-    with open('p.pkl','wb') as f :
-        pickle.dump(returns_,f)
+    long_score_t = r10t.groupby('time').sum()['returnsOpenNextMktres10'].values
+    long_score_t = long_score_t.mean() / long_score_t.std()
 
+    short_score_t = abs(r10t).groupby('time').sum()['returnsOpenNextMktres10'].values
+    bl_score_t_top = short_score_t.mean() / short_score_t.std()
 
-    bl_score_t = returns_.groupby('time').sum().values
-    bl_score_t = bl_score_t.mean() / bl_score_t.std()
-
-    bl_score_t_top = abs(returns_).groupby('time').sum().values
-    bl_score_t_top = bl_score_t_top.mean() / bl_score_t_top.std()
-    r =  returns_['returnsOpenNextMktres10']
-
-    y_ = (returns_['returnsOpenNextMktres10'] > 0).astype(int) * 2 - 1
-    y_[r > r.quantile] = (returns_['returnsOpenNextMktres10'] > 0).astype(int) * 2 - 1
-
+    r =  r10t['returnsOpenNextMktres10']
+    y_ = (r > 0).astype(int) * 2 - 1
     y_ = y_ * 100
+    r_a = abs(r)
+    y_[r_a > r_a.quantile()] /= 2
+    r_a[r_a > r_a.quantile()] /= 2
+    y_[r_a > r_a.quantile()] /= 2
 
+    r = r10cv['returnsOpenNextMktres10']
+    y_c = (r > 0).astype(int) * 2 - 1
+    y_c = y_c * 100
+    r_a = abs(r)
+    y_c[r_a > r_a.quantile()] /= 2
+    r_a[r_a > r_a.quantile()] /= 2
+    y_c[r_a > r_a.quantile()] /= 2
 
     nn.partial_fit(df,
                    y_,
                    CAT_ANS
                    )
 
+    lgtrain, lgval = lgb.Dataset(df, y_), lgb.Dataset(cv_, y_c)
+    lgbmodel = lgb.train(params, lgtrain, 2000, valid_sets=[lgtrain, lgval],
+                         early_stopping_rounds=100, verbose_eval=200)
+
+    preds_L = lgbmodel.predict(df_cv,
+                             num_iteration=lgbmodel.best_iteration)
     ans = []
     # for golbal_loop in range(100):
     #     for iteration_ in range(10):
@@ -328,7 +363,7 @@ if __name__ == '__main__':
     ret = []
 
     score_df = returns_c
-    score_df['res'] = score_df['returnsOpenNextMktres10'] * pred / 100
+    score_df['res'] = score_df['returnsOpenNextMktres10'] * preds_L / 100
     score_df = score_df.groupby('time').sum()['res'].values
     score = score_df.mean() / score_df.std()
     print("_______________CV______________", score, ' VS ', bl_score,

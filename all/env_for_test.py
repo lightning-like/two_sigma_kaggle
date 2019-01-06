@@ -138,4 +138,33 @@ def speed_test():
 
 if __name__ == '__main__':
 
-    create_data()
+    dict_vol = {}
+    news_cols_agg = {
+        'urgency':           ['min', 'max', 'std'],
+        'companyCount':      ['min', 'max', 'mean', 'std'],
+        'sentimentNegative': ['min', 'max', 'mean', 'std'],
+        'sentimentNeutral':  ['min', 'max', 'mean', 'std'],
+        'sentimentPositive': ['min', 'max', 'mean', 'std'],
+        }
+
+    # columns
+    RETURN_10_NEXT = 'returnsOpenNextMktres10'
+    TIME = 'time'
+    ASSET = 'assetCode'
+    UNIVERSE = 'universe'
+    GROUP_COLS = [TIME, RETURN_10_NEXT, ASSET, UNIVERSE, 'assetName']
+
+    NEWS_COL = [TIME, ASSET] + list(news_cols_agg)
+    with open('input_news_data_2', 'rb') as f:
+        news = pickle.load(f)  # type: pd.DataFrame
+    news.loc[:, TIME] = pd.to_datetime(
+            news[TIME]
+            ).dt.strftime("%Y%m%d").astype(int)
+    news[ASSET] = news['assetCodes'].map(
+            lambda x: list(eval(x))[0])
+
+    news = news[ASSET].apply(pd.Series) \
+        .merge(news, right_index=True, left_index=True) \
+        .melt(id_vars=NEWS_COL, value_name="ingredient") \
+        .dropna()
+    print(news)
